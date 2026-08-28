@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#002145" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="DxL Word Grid" />
+    <title>DxL Word Grid</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="mast">
+        <p class="eyebrow">Shared board · connected letters</p>
+        <h1>DxL Word Grid</h1>
+      </header>
+
+      <section id="screen-setup" class="layout-setup">
+        <article class="rules">
+          <h2>Before you start</h2>
+          <ol>
+            <li>One person creates a room and shares the code. Everyone else joins from their own phone or computer.</li>
+            <li>The host picks the board size and round length, then starts when at least two people are in.</li>
+            <li>Everyone sees the same board. Drag through letters on your own screen.</li>
+            <li>Letters must touch — including diagonals. The trail can turn. You cannot reuse a cell.</li>
+            <li>A unique word scores its <strong>length times itself</strong> (a 5-letter unique word is 25 points). A word two or more players found is worth <strong>1 point per letter</strong>.</li>
+            <li>When time runs out, the highest point total wins. Ties break on unique finds, then word count.</li>
+          </ol>
+        </article>
+
+        <form id="setup-form" class="setup-card" autocomplete="off">
+          <fieldset>
+            <legend>Your name</legend>
+            <input id="self-name" type="text" maxlength="18" required placeholder="Maya" autocapitalize="words" autocomplete="nickname" enterkeyhint="done" />
+          </fieldset>
+
+          <fieldset>
+            <legend>Board size</legend>
+            <div class="choice-row" role="radiogroup" aria-label="Board size">
+              <label class="choice"><input type="radio" name="size" value="8" /> 8×8</label>
+              <label class="choice"><input type="radio" name="size" value="10" checked /> 10×10</label>
+              <label class="choice"><input type="radio" name="size" value="12" /> 12×12</label>
+              <label class="choice"><input type="radio" name="size" value="15" /> 15×15</label>
+            </div>
+            <p class="field-hint">The host sets this. Joiners ignore it. Every size fits a phone screen.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Round length</legend>
+            <div class="choice-row" role="radiogroup" aria-label="Round length">
+              <label class="choice"><input type="radio" name="duration" value="60" /> 1 min</label>
+              <label class="choice"><input type="radio" name="duration" value="120" checked /> 2 min</label>
+              <label class="choice"><input type="radio" name="duration" value="180" /> 3 min</label>
+              <label class="choice"><input type="radio" name="duration" value="300" /> 5 min</label>
+            </div>
+          </fieldset>
+
+          <button type="button" id="host-btn" class="btn solid">Create room</button>
+          <div class="join-row">
+            <input id="join-code" type="text" maxlength="4" placeholder="Code" autocapitalize="characters" autocomplete="off" spellcheck="false" />
+            <button type="button" id="join-btn" class="btn ghost">Join room</button>
+          </div>
+          <p id="setup-error" class="error" hidden></p>
+        </form>
+      </section>
+
+      <section id="screen-lobby" hidden>
+        <div class="setup-card lobby-card">
+          <p class="eyebrow">Room code</p>
+          <p id="lobby-code" class="room-code">----</p>
+          <p id="lobby-link" class="field-hint"></p>
+          <h2>Players</h2>
+          <ul id="lobby-players" class="lobby-players"></ul>
+          <button type="button" id="lobby-start" class="btn solid" hidden>Start round</button>
+          <p id="lobby-wait" class="field-hint">Waiting for the host to start.</p>
+          <p id="lobby-error" class="error" hidden></p>
+        </div>
+      </section>
+
+      <section id="screen-play" hidden>
+        <div class="play-chrome">
+          <div class="play-top">
+            <div class="timer-plaque" aria-live="polite">
+              <span class="timer-label">Time left</span>
+              <span id="timer" class="timer">2:00</span>
+            </div>
+            <p id="selection-readout" class="selection-readout">Drag through connected letters.</p>
+          </div>
+          <div id="player-switcher" class="switcher"></div>
+        </div>
+
+        <div class="play-grid-wrap">
+          <div class="rail">
+            <div id="board" class="board" role="grid" aria-label="Letter grid"></div>
+          </div>
+          <aside class="sidebar">
+            <div id="live-standings" class="standings"></div>
+            <div class="found-panel">
+              <h2 id="found-heading">Finds</h2>
+              <ul id="found-list" class="found-list"></ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="screen-results" hidden>
+        <div id="winner-banner" class="winner"></div>
+        <div id="results-body" class="results-body"></div>
+        <button type="button" id="play-again" class="btn solid">Play again</button>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
