@@ -15,6 +15,9 @@ const page = await browser.newPage({
   deviceScaleFactor: 2,
 });
 await page.goto(origin, { waitUntil: "networkidle", timeout: 30_000 });
+await page.waitForSelector("#screen-setup");
+await page.screenshot({ path: path.join(outDir, "setup.png"), type: "png" });
+
 await page.locator("#self-name").fill("Ada");
 await page.locator('#setup-form input[name="size"][value="8"]').click();
 await page.locator("#host-btn").click();
@@ -32,4 +35,4 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: path.join(outDir, "play.png"), type: "png" });
 
 await browser.close();
-console.log("Wrote docs/lobby.png and docs/play.png");
+console.log("Wrote docs/setup.png, docs/lobby.png, and docs/play.png");

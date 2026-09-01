@@ -2,6 +2,8 @@
 
 A timed, multiplayer word hunt. Each group gets a room. People join from their own phones or computers and hunt on the same board. Unique finds score more than words several people spotted.
 
+![DxL Word Grid opening page](docs/setup.png)
+
 ![DxL Word Grid during a round](docs/play.png)
 
 ## How to play
