@@ -2,6 +2,7 @@
 Thumbs.db
 node_modules/
 telemetry/
+.chrome-capture/
 .terraform/
 *.tfstate
 *.tfstate.*
