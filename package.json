@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test engine.test.js telemetry.test.js"
+    "test": "node --test engine.test.js telemetry.test.js",
+    "words": "node scripts/build-words.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

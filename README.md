@@ -11,7 +11,7 @@ A timed, multiplayer word hunt. Each group gets a room. People join from their o
 1. One person creates a room, then shares the 4-letter code or the QR code.
 2. Everyone else opens the same site, types their name, and joins with that code.
 3. The host starts the round. Board size, time, and difficulty are set by the host. Solo play works.
-4. Drag through connected letters on your own screen. The trail can turn. You cannot reuse a cell.
+4. Drag through connected letters on your own screen. The trail can turn. You cannot reuse a cell. Finds must be in the ENABLE word list (about 160,000 English words, 3–12 letters).
 5. Unique word: **length × length**. Shared word: **1 point per letter**.
 6. When time ends, everyone sees the same point breakdown.
 
