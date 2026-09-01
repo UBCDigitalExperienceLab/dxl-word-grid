@@ -132,6 +132,33 @@ test("generateGrid fills every cell and plants words", () => {
   assert.ok(grid.every((row) => row.every((cell) => /^[A-Z]$/.test(cell))));
 });
 
+test("easy plants shorter words than hard", () => {
+  const words = [
+    "cat",
+    "dog",
+    "hat",
+    "sun",
+    "map",
+    "stream",
+    "forest",
+    "planet",
+    "bridge",
+    "window",
+    "castle",
+  ];
+  const easy = generateGrid(8, words, () => 0.35, "easy");
+  const hard = generateGrid(8, words, () => 0.35, "hard");
+  assert.ok(easy.placed.length >= 1);
+  assert.ok(easy.placed.every((word) => word.length <= 6));
+  assert.ok(hard.placed.every((word) => word.length >= 5));
+});
+
+test("unknown difficulty falls back to medium", () => {
+  const words = ["stream", "ocean", "forest", "light", "table", "river"];
+  const { grid } = generateGrid(8, words, () => 0.4, "unknown");
+  assert.ok(grid.every((row) => row.every((cell) => /^[A-Z]$/.test(cell))));
+});
+
 test("pointsForFinders distinguishes unique and shared", () => {
   assert.equal(pointsForFinders("word", 1), 16);
   assert.equal(pointsForFinders("feed", 1), 16);

@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test engine.test.js"
+    "test": "node --test engine.test.js telemetry.test.js"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "ws": "^8.18.3"
   }
 }

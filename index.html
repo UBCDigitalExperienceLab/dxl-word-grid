@@ -29,8 +29,8 @@
         <article class="rules">
           <h2>Before you start</h2>
           <ol>
-            <li>One person creates a room and shares the code. Everyone else joins from their own phone or computer.</li>
-            <li>The host picks the board size and round length, then starts when at least two people are in.</li>
+            <li>One person creates a room and shares the code or QR code. Everyone else joins from their own phone or computer.</li>
+            <li>The host picks the board size, round length, and difficulty, then starts the round. Solo play works; others can still join the next round.</li>
             <li>Everyone sees the same board. Drag through letters on your own screen.</li>
             <li>Letters must touch — including diagonals. The trail can turn. You cannot reuse a cell.</li>
             <li>A unique word scores its <strong>length times itself</strong> (a 5-letter unique word is 25 points). A word two or more players found is worth <strong>1 point per letter</strong>.</li>
@@ -42,6 +42,16 @@
           <fieldset>
             <legend>Your name</legend>
             <input id="self-name" type="text" maxlength="18" required placeholder="Maya" autocapitalize="words" autocomplete="nickname" enterkeyhint="done" />
+          </fieldset>
+
+          <fieldset>
+            <legend>Difficulty</legend>
+            <div class="choice-row" role="radiogroup" aria-label="Difficulty">
+              <label class="choice"><input type="radio" name="difficulty" value="easy" /> Easy</label>
+              <label class="choice"><input type="radio" name="difficulty" value="medium" checked /> Medium</label>
+              <label class="choice"><input type="radio" name="difficulty" value="hard" /> Hard</label>
+            </div>
+            <p class="field-hint">Easy plants more short, straight words. Hard hides longer winding words and uses rarer letters.</p>
           </fieldset>
 
           <fieldset>
@@ -70,19 +80,28 @@
             <input id="join-code" type="text" maxlength="4" placeholder="Code" autocapitalize="characters" autocomplete="off" spellcheck="false" />
             <button type="button" id="join-btn" class="btn ghost">Join room</button>
           </div>
+          <p id="setup-invite" class="field-hint" hidden></p>
           <p id="setup-error" class="error" hidden></p>
         </form>
       </section>
 
       <section id="screen-lobby" hidden>
         <div class="setup-card lobby-card">
+          <button type="button" id="lobby-home" class="btn ghost lobby-home">Home</button>
           <p class="eyebrow">Room code</p>
           <p id="lobby-code" class="room-code">----</p>
+          <p id="lobby-settings" class="field-hint"></p>
+          <figure id="lobby-qr-wrap" class="lobby-qr-wrap" hidden>
+            <img id="lobby-qr" alt="QR code to join this room" />
+            <figcaption class="field-hint">Scan to join. You'll still enter your name.</figcaption>
+          </figure>
           <p id="lobby-link" class="field-hint"></p>
           <h2>Players</h2>
           <ul id="lobby-players" class="lobby-players"></ul>
           <button type="button" id="lobby-start" class="btn solid" hidden>Start round</button>
+          <p id="lobby-start-hint" class="field-hint" hidden>You can start alone, or wait for others.</p>
           <p id="lobby-wait" class="field-hint">Waiting for the host to start.</p>
+          <p id="lobby-home-hint" class="field-hint" hidden>Home closes this room for everyone.</p>
           <p id="lobby-error" class="error" hidden></p>
         </div>
       </section>

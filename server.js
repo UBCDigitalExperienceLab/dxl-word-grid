@@ -5,7 +5,19 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import { generateGrid, scoreGame, validateFind } from "./engine.js";
+import QRCode from "qrcode";
+import { DIFFICULTIES, generateGrid, scoreGame, validateFind } from "./engine.js";
+import {
+  addPlayer,
+  applyClientEvent,
+  closeSession,
+  createSession,
+  finishRound,
+  markPlayerLeft,
+  recordEvent,
+  recordFind,
+  startRound,
+} from "./telemetry.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 5173;
@@ -78,6 +90,36 @@ function broadcast(room, payload) {
   for (const player of room.players) send(player.ws, payload);
 }
 
+function publicOrigin() {
+  const raw = String(process.env.PUBLIC_URL ?? "").trim().replace(/\/+$/, "");
+  if (raw) return raw;
+  const ip = lanAddresses()[0];
+  return ip ? `http://${ip}:${PORT}` : `http://127.0.0.1:${PORT}`;
+}
+
+function joinOrigin() {
+  return publicOrigin();
+}
+
+function joinUrlFor(code) {
+  return `${joinOrigin()}/?code=${code}`;
+}
+
+async function roomShare(code) {
+  const joinUrl = joinUrlFor(code);
+  try {
+    const qrDataUrl = await QRCode.toDataURL(joinUrl, {
+      width: 280,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: { dark: "#002145", light: "#ffffff" },
+    });
+    return { joinUrl, qrDataUrl };
+  } catch {
+    return { joinUrl, qrDataUrl: "" };
+  }
+}
+
 function lobbyPayload(room) {
   return {
     type: "lobby",
@@ -85,7 +127,10 @@ function lobbyPayload(room) {
     hostId: room.hostId,
     size: room.size,
     durationSec: room.durationSec,
+    difficulty: room.difficulty,
     players: publicPlayers(room),
+    joinUrl: room.joinUrl ?? joinUrlFor(room.code),
+    qrDataUrl: room.qrDataUrl ?? "",
   };
 }
 
@@ -100,7 +145,9 @@ function endRound(room) {
   if (room.phase !== "play") return;
   clearTimer(room);
   room.phase = "results";
-  broadcast(room, { type: "ended", rankings: rankingsOf(room) });
+  const rankings = rankingsOf(room);
+  finishRound(room.telemetry, rankings);
+  broadcast(room, { type: "ended", rankings });
 }
 
 function leaveRoom(ws) {
@@ -109,13 +156,21 @@ function leaveRoom(ws) {
   sockets.delete(ws);
   const room = rooms.get(info.code);
   if (!room) return;
+  const leavingHost = info.playerId === room.hostId;
+  markPlayerLeft(room.telemetry, info.playerId);
+  recordEvent(room.telemetry, "player_left", {
+    playerId: info.playerId,
+    remaining: room.players.length - 1,
+  });
   room.players = room.players.filter((player) => player.id !== info.playerId);
-  if (room.players.length === 0 || info.playerId === room.hostId) {
+  if (room.players.length === 0 || leavingHost) {
     clearTimer(room);
     for (const player of room.players) {
       send(player.ws, { type: "closed", message: "The host left the room." });
       sockets.delete(player.ws);
+      markPlayerLeft(room.telemetry, player.id);
     }
+    closeSession(room.telemetry, leavingHost ? "host_left" : "empty");
     rooms.delete(room.code);
     return;
   }
@@ -123,15 +178,17 @@ function leaveRoom(ws) {
   else broadcast(room, { type: "scores", rankings: rankingsOf(room) });
 }
 
-function handleHost(ws, message) {
+async function handleHost(ws, message) {
   const name = String(message.name ?? "").trim().slice(0, 18);
   const size = Number(message.size);
   const durationSec = Number(message.durationSec);
+  const difficulty = String(message.difficulty ?? "medium");
   if (!name) return send(ws, { type: "error", message: "Enter your name." });
   if (![8, 10, 12, 15].includes(size)) return send(ws, { type: "error", message: "Pick a board size." });
   if (![60, 120, 180, 300].includes(durationSec)) {
     return send(ws, { type: "error", message: "Pick a round length." });
   }
+  if (!DIFFICULTIES[difficulty]) return send(ws, { type: "error", message: "Pick a difficulty." });
   leaveRoom(ws);
   const code = makeCode();
   const player = { id: makeId(), name, color: PLAYER_COLORS[0], ws };
@@ -140,6 +197,7 @@ function handleHost(ws, message) {
     hostId: player.id,
     size,
     durationSec,
+    difficulty,
     phase: "lobby",
     players: [player],
     finds: new Map(),
@@ -147,7 +205,22 @@ function handleHost(ws, message) {
     planted: [],
     endAt: 0,
     timer: null,
+    telemetry: createSession({
+      sessionId: makeId(),
+      code,
+      difficulty,
+      size,
+      durationSec,
+    }),
+    joinUrl: "",
+    qrDataUrl: "",
   };
+  const share = await roomShare(code);
+  room.joinUrl = share.joinUrl;
+  room.qrDataUrl = share.qrDataUrl;
+  addPlayer(room.telemetry, { id: player.id, name: player.name, isHost: true });
+  recordEvent(room.telemetry, "room_created", { difficulty, size, durationSec });
+  recordEvent(room.telemetry, "player_joined", { playerId: player.id, isHost: true, playerCount: 1 });
   rooms.set(code, room);
   sockets.set(ws, { code, playerId: player.id });
   send(ws, { type: "welcome", playerId: player.id, isHost: true });
@@ -178,6 +251,12 @@ function handleJoin(ws, message) {
   };
   room.players.push(player);
   sockets.set(ws, { code: room.code, playerId: player.id });
+  addPlayer(room.telemetry, { id: player.id, name: player.name, isHost: false });
+  recordEvent(room.telemetry, "player_joined", {
+    playerId: player.id,
+    isHost: false,
+    playerCount: room.players.length,
+  });
   send(ws, { type: "welcome", playerId: player.id, isHost: false });
   broadcast(room, lobbyPayload(room));
 }
@@ -189,15 +268,28 @@ function handleStart(ws) {
     return send(ws, { type: "error", message: "Only the host can start." });
   }
   if (room.phase !== "lobby") return send(ws, { type: "error", message: "The round already started." });
-  if (room.players.length < 2) {
-    return send(ws, { type: "error", message: "Need at least two players." });
+  if (room.players.length < 1) {
+    return send(ws, { type: "error", message: "No players in the room." });
   }
-  const generated = generateGrid(room.size, [...wordSet]);
+  room.phase = "starting";
+  const generateStarted = Date.now();
+  let generated;
+  try {
+    generated = generateGrid(room.size, [...wordSet], Math.random, room.difficulty);
+  } catch {
+    room.phase = "lobby";
+    return send(ws, { type: "error", message: "Could not build the board. Try again." });
+  }
   room.grid = generated.grid;
   room.planted = generated.placed;
   room.finds = new Map(room.players.map((player) => [player.id, []]));
   room.phase = "play";
   room.endAt = Date.now() + room.durationSec * 1000;
+  startRound(room.telemetry, {
+    plantedCount: generated.placed.length,
+    generateMs: Date.now() - generateStarted,
+    playerCount: room.players.length,
+  });
   clearTimer(room);
   room.timer = setTimeout(() => endRound(room), room.durationSec * 1000 + 50);
   broadcast(room, {
@@ -213,14 +305,21 @@ function handleStart(ws) {
 function handleFind(ws, message) {
   const info = sockets.get(ws);
   const room = info ? rooms.get(info.code) : null;
-  if (!room || room.phase !== "play") return send(ws, { type: "find-err", message: "The round is not active." });
+  if (!room || room.phase !== "play") {
+    if (room) recordFind(room.telemetry, info.playerId, { ok: false, reason: "not_active" });
+    return send(ws, { type: "find-err", message: "The round is not active." });
+  }
   const cells = Array.isArray(message.cells)
     ? message.cells.map((cell) => ({ r: Number(cell.r), c: Number(cell.c) }))
     : [];
   const result = validateFind(room.grid, cells, wordSet);
-  if (!result.ok) return send(ws, { type: "find-err", message: result.reason });
+  if (!result.ok) {
+    recordFind(room.telemetry, info.playerId, { ok: false, reason: result.reason });
+    return send(ws, { type: "find-err", message: result.reason });
+  }
   const words = room.finds.get(info.playerId) ?? [];
   if (words.includes(result.word)) {
+    recordFind(room.telemetry, info.playerId, { ok: false, reason: "duplicate" });
     return send(ws, { type: "find-err", message: `You already found ${result.word.toUpperCase()}` });
   }
   room.finds.set(info.playerId, words.concat(result.word));
@@ -230,6 +329,12 @@ function handleFind(ws, message) {
     (item) => item.word === result.word.toUpperCase(),
   );
   const kind = entry?.finderCount === 1 ? "unique" : "shared";
+  recordFind(room.telemetry, info.playerId, {
+    ok: true,
+    word: result.word,
+    kind,
+    length: result.word.length,
+  });
   send(ws, {
     type: "find-ok",
     word: result.word.toUpperCase(),
@@ -251,18 +356,42 @@ function handleAgain(ws) {
   room.grid = null;
   room.finds = new Map();
   room.endAt = 0;
+  recordEvent(room.telemetry, "play_again", { playerId: info.playerId });
   broadcast(room, lobbyPayload(room));
+}
+
+function handleTelemetry(ws, message) {
+  const info = sockets.get(ws);
+  const room = info ? rooms.get(info.code) : null;
+  if (!room) return;
+  applyClientEvent(room.telemetry, info.playerId, message);
 }
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  if (url.pathname === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (url.pathname === "/api/info") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ port: PORT, addresses: lanAddresses() }));
+    res.end(JSON.stringify({
+      ok: true,
+      port: PORT,
+      addresses: lanAddresses(),
+      publicUrl: publicOrigin(),
+    }));
     return;
   }
   let relative = decodeURIComponent(url.pathname).replace(/^\/+/, "");
   if (!relative || relative === "") relative = "index.html";
+  const top = relative.split(/[/\\]/)[0];
+  if (top === "telemetry" || relative === "server.js" || relative === "telemetry.js") {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
   const filePath = path.normalize(path.join(ROOT, relative));
   const resolved = path.resolve(filePath);
   if (resolved !== ROOT && !resolved.startsWith(ROOT + path.sep)) {
@@ -291,18 +420,22 @@ wss.on("connection", (ws) => {
     } catch {
       return send(ws, { type: "error", message: "Bad message." });
     }
-    if (message.type === "host") handleHost(ws, message);
+    if (message.type === "host") {
+      handleHost(ws, message).catch(() => send(ws, { type: "error", message: "Could not create the room." }));
+    }
     else if (message.type === "join") handleJoin(ws, message);
     else if (message.type === "start") handleStart(ws);
     else if (message.type === "find") handleFind(ws, message);
     else if (message.type === "again") handleAgain(ws);
+    else if (message.type === "telemetry") handleTelemetry(ws, message);
   });
   ws.on("close", () => leaveRoom(ws));
 });
 
 function onListen() {
   const extra = lanAddresses().map((ip) => `http://${ip}:${PORT}`).join("  ");
-  console.log(`DxL Word Grid at http://localhost:${PORT}${extra ? `  ${extra}` : ""}`);
+  const published = process.env.PUBLIC_URL ? `  public ${publicOrigin()}` : "";
+  console.log(`DxL Word Grid at http://localhost:${PORT}${extra ? `  ${extra}` : ""}${published}`);
 }
 
 if (process.env.HOST) server.listen(PORT, process.env.HOST, onListen);

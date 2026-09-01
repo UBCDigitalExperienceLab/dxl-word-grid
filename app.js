@@ -1,5 +1,6 @@
 import {
   MIN_WORD_LENGTH,
+  DIFFICULTIES,
   applyCellToPath,
   areAdjacent,
   lineCells,
@@ -22,7 +23,7 @@ const state = {
   grewByDrag: false,
   startCell: null,
   path: [],
-  lanHint: "",
+  leaving: false,
 };
 
 let socket = null;
@@ -40,12 +41,19 @@ const els = {
   hostBtn: document.getElementById("host-btn"),
   joinBtn: document.getElementById("join-btn"),
   joinCode: document.getElementById("join-code"),
+  setupInvite: document.getElementById("setup-invite"),
   setupError: document.getElementById("setup-error"),
   lobbyCode: document.getElementById("lobby-code"),
+  lobbySettings: document.getElementById("lobby-settings"),
+  lobbyQrWrap: document.getElementById("lobby-qr-wrap"),
+  lobbyQr: document.getElementById("lobby-qr"),
   lobbyLink: document.getElementById("lobby-link"),
   lobbyPlayers: document.getElementById("lobby-players"),
   lobbyStart: document.getElementById("lobby-start"),
+  lobbyStartHint: document.getElementById("lobby-start-hint"),
   lobbyWait: document.getElementById("lobby-wait"),
+  lobbyHome: document.getElementById("lobby-home"),
+  lobbyHomeHint: document.getElementById("lobby-home-hint"),
   lobbyError: document.getElementById("lobby-error"),
   board: document.getElementById("board"),
   timer: document.getElementById("timer"),
@@ -62,14 +70,36 @@ const els = {
 
 let toastTimer = 0;
 const IDLE_HINT = "Drag through connected letters.";
+let currentScreen = "setup";
+let lastPresenceAt = Date.now();
+
+function trackClient(event, extra = {}) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: "telemetry", event, ...extra }));
+}
+
+function flushPresence() {
+  const now = Date.now();
+  const ms = now - lastPresenceAt;
+  lastPresenceAt = now;
+  if (ms <= 0 || ms > 120_000) return;
+  if (currentScreen === "lobby" || currentScreen === "play" || currentScreen === "results") {
+    trackClient("presence", { screen: currentScreen, ms });
+  }
+}
 
 function showScreen(name) {
+  flushPresence();
   Object.entries(screens).forEach(([key, node]) => {
     node.hidden = key !== name;
   });
   document.body.classList.toggle("is-playing", name === "play");
   document.documentElement.classList.toggle("is-playing", name === "play");
   document.documentElement.classList.remove("is-dragging");
+  currentScreen = name;
+  if (name === "lobby" || name === "play" || name === "results") {
+    trackClient("screen", { screen: name });
+  }
 }
 
 function showError(node, message) {
@@ -97,6 +127,31 @@ function selfName() {
   return els.selfName.value.trim();
 }
 
+function inviteCodeFromUrl() {
+  try {
+    const raw = new URLSearchParams(location.search).get("code") ?? "";
+    return raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  } catch {
+    return "";
+  }
+}
+
+function applyInviteFromUrl() {
+  const code = inviteCodeFromUrl();
+  if (!code) return;
+  els.joinCode.value = code;
+  els.setupInvite.hidden = false;
+  els.setupInvite.textContent = `Joining room ${code}. Enter your name, then tap Join room.`;
+  els.selfName.focus();
+}
+
+function clearInviteFromUrl() {
+  if (!inviteCodeFromUrl()) return;
+  history.replaceState({}, "", `${location.pathname || "/"}${location.hash}`);
+  els.setupInvite.hidden = true;
+  els.setupInvite.textContent = "";
+}
+
 function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return socket;
@@ -111,11 +166,30 @@ function connect() {
     }
   });
   socket.addEventListener("close", () => {
-    if (!screens.setup.hidden) return;
+    if (state.leaving || !screens.setup.hidden) {
+      state.leaving = false;
+      return;
+    }
     showError(els.setupError, "Disconnected from the room.");
     showScreen("setup");
   });
   return socket;
+}
+
+function goHome() {
+  flushPresence();
+  trackClient("home");
+  state.leaving = true;
+  window.clearInterval(state.timerId);
+  state.isHost = false;
+  state.roomCode = "";
+  state.activeId = null;
+  if (socket) {
+    socket.close();
+    socket = null;
+  }
+  showError(els.setupError, "");
+  showScreen("setup");
 }
 
 function send(payload) {
@@ -125,12 +199,26 @@ function send(payload) {
   else ws.addEventListener("open", fire, { once: true });
 }
 
+function formatDuration(sec) {
+  if (sec % 60 === 0) return `${sec / 60} min`;
+  return `${sec}s`;
+}
+
 function renderLobby(payload) {
   state.roomCode = payload.code;
   state.players = payload.players;
   els.lobbyCode.textContent = payload.code;
-  const joinAt = state.lanHint || location.origin;
-  els.lobbyLink.textContent = `Others open ${joinAt} and enter this code.`;
+  const spec = DIFFICULTIES[payload.difficulty] ?? DIFFICULTIES.medium;
+  els.lobbySettings.textContent = `${spec.label} · ${payload.size}×${payload.size} · ${formatDuration(payload.durationSec)}`;
+  if (payload.qrDataUrl) {
+    els.lobbyQr.src = payload.qrDataUrl;
+    els.lobbyQrWrap.hidden = false;
+  } else {
+    els.lobbyQr.removeAttribute("src");
+    els.lobbyQrWrap.hidden = true;
+  }
+  const joinAt = payload.joinUrl || `${state.lanHint || location.origin}/?code=${payload.code}`;
+  els.lobbyLink.textContent = `Or open ${joinAt}`;
   els.lobbyPlayers.innerHTML = payload.players
     .map((player) => {
       const you = player.id === state.activeId ? " (you)" : "";
@@ -139,8 +227,10 @@ function renderLobby(payload) {
     })
     .join("");
   els.lobbyStart.hidden = !state.isHost;
-  els.lobbyWait.hidden = state.isHost;
-  els.lobbyStart.disabled = payload.players.length < 2;
+  els.lobbyStartHint.hidden = !state.isHost;
+  els.lobbyHomeHint.hidden = !state.isHost;
+  els.lobbyStart.disabled = false;
+  els.lobbyStart.textContent = "Start round";
   showError(els.lobbyError, "");
   showScreen("lobby");
 }
@@ -325,6 +415,7 @@ function onPointerDown(event) {
   state.startCell = cell;
   document.documentElement.classList.add("is-dragging");
   setPath([cell], false);
+  trackClient("selection");
   if (event.currentTarget?.setPointerCapture && event.pointerId != null) {
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -432,11 +523,14 @@ function onServerMessage(message) {
   if (message.type === "error") {
     const node = screens.lobby.hidden ? els.setupError : els.lobbyError;
     showError(node, message.message);
+    els.lobbyStart.disabled = false;
+    els.lobbyStart.textContent = "Start round";
     return;
   }
   if (message.type === "welcome") {
     state.activeId = message.playerId;
     state.isHost = message.isHost;
+    clearInviteFromUrl();
     return;
   }
   if (message.type === "lobby") {
@@ -500,6 +594,7 @@ function bindSetup() {
       name: selfName(),
       size: Number(els.form.elements.size.value),
       durationSec: Number(els.form.elements.duration.value),
+      difficulty: els.form.elements.difficulty.value,
     });
   });
 
@@ -517,7 +612,14 @@ function bindSetup() {
     send({ type: "join", name: selfName(), code });
   });
 
-  els.lobbyStart.addEventListener("click", () => send({ type: "start" }));
+  els.lobbyStart.addEventListener("click", () => {
+    els.lobbyStart.disabled = true;
+    els.lobbyStart.textContent = "Starting…";
+    showError(els.lobbyError, "");
+    send({ type: "start" });
+  });
+
+  els.lobbyHome.addEventListener("click", goHome);
 
   els.playAgain.addEventListener("click", () => {
     if (state.isHost) send({ type: "again" });
@@ -544,12 +646,23 @@ async function loadWords() {
 bindSetup();
 bindBoard();
 showScreen("setup");
+applyInviteFromUrl();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) flushPresence();
+  else lastPresenceAt = Date.now();
+});
+window.setInterval(() => {
+  if (!document.hidden) flushPresence();
+}, 10_000);
+window.addEventListener("pagehide", flushPresence);
 
 loadWords().catch((error) => showError(els.setupError, error.message));
 
 fetch("/api/info")
   .then((response) => response.json())
   .then((info) => {
-    if (info.addresses?.[0]) state.lanHint = `http://${info.addresses[0]}:${info.port}`;
+    if (info.publicUrl) state.lanHint = info.publicUrl;
+    else if (info.addresses?.[0]) state.lanHint = `http://${info.addresses[0]}:${info.port}`;
   })
   .catch(() => {});

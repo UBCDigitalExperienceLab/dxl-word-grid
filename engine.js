@@ -17,6 +17,48 @@ export const SHARED_POINTS_PER_LETTER = 1;
 const LETTER_BAG =
   "EEEEEEEEEEEEAAAAAAAAAIIIIIIIIIOOOOOOOONNNNNNRRRRRRTTTTTTLLLLSSSSUUUUDDDDGGGBBCCMMPPFFHHVVWWYYKJXQZ";
 
+export const DIFFICULTIES = {
+  easy: {
+    id: "easy",
+    label: "Easy",
+    minLen: 3,
+    maxLen: 6,
+    plantFactor: 2.6,
+    snakeFactor: 0.15,
+    snakeMin: 0,
+    preferOrthogonal: true,
+    letterBag:
+      "EEEEEEEEEEEEEEEEAAAAAAAAAAAAIIIIIIIIIIOOOOOOOOOUNNNNNNRRRRRRTTTTTTLLLLSSSSDDDGGGBMMPPFFHHWY",
+  },
+  medium: {
+    id: "medium",
+    label: "Medium",
+    minLen: 4,
+    maxLen: 8,
+    plantFactor: 1.7,
+    snakeFactor: 0.5,
+    snakeMin: 2,
+    preferOrthogonal: false,
+    letterBag: LETTER_BAG,
+  },
+  hard: {
+    id: "hard",
+    label: "Hard",
+    minLen: 5,
+    maxLen: 10,
+    plantFactor: 1.1,
+    snakeFactor: 1.1,
+    snakeMin: 4,
+    preferOrthogonal: false,
+    letterBag:
+      "EEEEEAAAAAIIIIOOOOONNNNRRRRTTTTLLSSUUUDDGGGBBCCMMPPFFHHVVWWYYKKJJQXXZZ",
+  },
+};
+
+export function difficultySpec(id) {
+  return DIFFICULTIES[id] ?? DIFFICULTIES.medium;
+}
+
 export function shuffle(items, rng = Math.random) {
   const next = items.slice();
   for (let i = next.length - 1; i > 0; i -= 1) {
@@ -118,9 +160,16 @@ function canPlace(grid, word, r, c, dr, dc) {
   return true;
 }
 
-function placeWord(grid, word, rng) {
+function placementDirs(rng, preferOrthogonal) {
+  if (!preferOrthogonal) return shuffle(DIRECTIONS, rng);
+  const orthogonal = DIRECTIONS.filter(([dr, dc]) => dr === 0 || dc === 0);
+  const diagonal = DIRECTIONS.filter(([dr, dc]) => dr !== 0 && dc !== 0);
+  return shuffle(orthogonal, rng).concat(shuffle(diagonal, rng));
+}
+
+function placeWord(grid, word, rng, preferOrthogonal = false) {
   const size = grid.length;
-  const dirs = shuffle(DIRECTIONS, rng);
+  const dirs = placementDirs(rng, preferOrthogonal);
   for (const [dr, dc] of dirs) {
     const slots = [];
     for (let r = 0; r < size; r += 1) {
@@ -178,21 +227,25 @@ function placeSnakeWord(grid, word, rng) {
   return false;
 }
 
-export function generateGrid(size, wordList, rng = Math.random) {
+export function generateGrid(size, wordList, rng = Math.random, difficulty = "medium") {
+  const spec = difficultySpec(difficulty);
   const grid = Array.from({ length: size }, () => Array(size).fill(""));
   const usable = wordList.filter(
-    (word) => word.length >= 4 && word.length <= Math.min(size, 10),
+    (word) => word.length >= spec.minLen && word.length <= Math.min(size, spec.maxLen),
   );
   const candidates = shuffle(usable, rng);
-  const target = Math.min(candidates.length, Math.round(size * 1.7));
+  const target = Math.min(candidates.length, Math.round(size * spec.plantFactor));
   const placed = [];
 
   for (const word of candidates) {
     if (placed.length >= target) break;
-    if (placeWord(grid, word, rng)) placed.push(word.toUpperCase());
+    if (placeWord(grid, word, rng, spec.preferOrthogonal)) placed.push(word.toUpperCase());
   }
 
-  const snakeTarget = Math.min(candidates.length, Math.max(2, Math.round(size * 0.5)));
+  const snakeTarget = Math.min(
+    candidates.length,
+    Math.max(spec.snakeMin, Math.round(size * spec.snakeFactor)),
+  );
   let snakes = 0;
   for (const word of candidates) {
     if (snakes >= snakeTarget) break;
@@ -207,7 +260,7 @@ export function generateGrid(size, wordList, rng = Math.random) {
   for (let r = 0; r < size; r += 1) {
     for (let c = 0; c < size; c += 1) {
       if (!grid[r][c]) {
-        grid[r][c] = LETTER_BAG[Math.floor(rng() * LETTER_BAG.length)];
+        grid[r][c] = spec.letterBag[Math.floor(rng() * spec.letterBag.length)];
       }
     }
   }

@@ -238,12 +238,45 @@ legend {
   margin: 0 auto;
 }
 
+.lobby-home {
+  width: auto;
+  min-height: 40px;
+  margin: 0 0 12px;
+  padding: 8px 0;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.lobby-home:hover,
+.lobby-home:focus-visible {
+  color: var(--white);
+}
+
 .room-code {
   margin: 0 0 8px;
   font-family: var(--font-display);
   font-size: clamp(40px, 12vw, 64px);
   letter-spacing: 0.18em;
   line-height: 1;
+}
+
+.lobby-qr-wrap {
+  margin: 16px 0 0;
+  padding: 14px;
+  background: var(--white);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.lobby-qr-wrap img {
+  display: block;
+  width: min(220px, 70vw);
+  height: auto;
+}
+
+.lobby-qr-wrap .field-hint {
+  color: var(--ink);
+  margin-top: 8px;
 }
 
 .lobby-card h2 {
@@ -298,6 +331,11 @@ button,
   color: var(--ink);
   width: 100%;
   margin-top: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn.tiny {

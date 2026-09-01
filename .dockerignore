@@ -1,0 +1,14 @@
+node_modules
+telemetry
+.git
+.github
+.terraform
+terraform
+*.tfstate
+*.tfvars
+*.md
+.gitignore
+.dockerignore
+Dockerfile
+engine.test.js
+telemetry.test.js
