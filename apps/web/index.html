@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Serif:ital@0;1&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -108,6 +108,9 @@
 
       <section id="screen-play" hidden>
         <div class="play-chrome">
+          <div class="play-nav">
+            <button type="button" id="play-home" class="btn ghost lobby-home">Home</button>
+          </div>
           <div class="play-top">
             <div class="timer-plaque" aria-live="polite">
               <span class="timer-label">Time left</span>
@@ -135,11 +138,14 @@
       <section id="screen-results" hidden>
         <div id="winner-banner" class="winner"></div>
         <div id="results-body" class="results-body"></div>
-        <button type="button" id="play-again" class="btn solid">Play again</button>
+        <div class="results-actions">
+          <button type="button" id="play-again" class="btn solid">Play again</button>
+          <button type="button" id="results-home" class="btn ghost">Home</button>
+        </div>
       </section>
     </main>
 
     <div id="toast" class="toast" hidden></div>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="./src/app.js"></script>
   </body>
 </html>
