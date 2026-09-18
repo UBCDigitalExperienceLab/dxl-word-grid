@@ -358,6 +358,15 @@ button,
   margin-bottom: 18px;
 }
 
+.play-nav {
+  display: flex;
+  align-items: center;
+}
+
+.play-nav .lobby-home {
+  margin: 0;
+}
+
 .play-top {
   display: flex;
   justify-content: space-between;
@@ -570,6 +579,16 @@ button,
   margin-bottom: 16px;
 }
 
+.results-actions {
+  display: grid;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.results-actions .btn.ghost {
+  width: 100%;
+}
+
 .result-player {
   border-top: 1px solid var(--line);
   padding: 16px 22px;
@@ -664,7 +683,6 @@ body.is-playing {
     overflow: hidden;
   }
 
-@media (max-width: 860px) {
   .shell {
     padding: 20px 16px 40px;
     padding-top: max(20px, env(safe-area-inset-top));
@@ -697,11 +715,16 @@ body.is-playing {
     flex-shrink: 0;
     z-index: 4;
     margin: 0;
-    gap: 6px;
+    gap: 4px;
     padding: 6px 0 8px;
     padding-top: max(6px, env(safe-area-inset-top));
     background: var(--navy-deep);
     box-shadow: none;
+  }
+
+  .play-nav .lobby-home {
+    min-height: 36px;
+    padding: 4px 0;
   }
 
   .play-top {

@@ -1,0 +1,13 @@
+{
+  "name": "@dxl/word-grid-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

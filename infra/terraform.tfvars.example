@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and adjust as needed.
+
+aws_region  = "ca-central-1"
+aws_profile = "dev"
+environment = "dev"
+name_prefix = "dxl-word-grid-dev"
+
+# Public base URL of the GitHub Pages site (no trailing slash), used for join links.
+# public_url = "https://ubcdigitalexperiencelab.github.io/dxl-word-grid"

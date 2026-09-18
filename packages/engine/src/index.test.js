@@ -8,7 +8,7 @@ import {
   lineCells,
   pointsForFinders,
   scoreGame,
-} from "./engine.js";
+} from "./index.js";
 
 test("unique words score length times length", () => {
   const result = scoreGame([

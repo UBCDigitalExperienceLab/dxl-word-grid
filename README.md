@@ -17,69 +17,112 @@ A timed, multiplayer word hunt. Each group gets a room. People join from their o
 
 Several groups can play at once — each room is separate.
 
-## Run
+## How it's hosted
 
-```bash
-npm install
-npm start
+This mirrors the dxl-roguelite setup: a static frontend on GitHub Pages, a small serverless backend on AWS, no server to keep running.
+
+- **Frontend (the web app)** — GitHub Pages, deployed by `.github/workflows/pages.yml`. It serves the static build from `apps/web/dist` (HTML/JS/CSS). Runs on GitHub's Pages/CDN, not AWS.
+- **Backend (real-time multiplayer)** — API Gateway **WebSocket** + a single **Lambda** + **DynamoDB**, in `ca-central-1`. Rooms, players, finds, and live connections live in one DynamoDB table. Deployed with `pnpm deploy:lambdas`.
+- **No GitHub login and no AI.** Players just type a name, exactly like before. Those pieces from the roguelite are intentionally left out.
+
+### Cost
+
+At this traffic level it sits inside the AWS free tier: Lambda, DynamoDB on-demand, and API Gateway WebSocket all have generous monthly allowances. All AWS resources are tagged `Project=dxl-word-grid` so cost can be tracked in isolation, and abandoned rooms self-expire via a DynamoDB TTL so nothing lingers. GitHub Pages hosting is free.
+
+## Repository layout
+
+```
+apps/web/            Static frontend (Vite). index.html + src/{app.js,config.js,styles.css}
+packages/engine/     Pure game rules (grid, validation, scoring) shared by web + lambda
+services/ws/         WebSocket Lambda (rooms, players, finds; DynamoDB-backed)
+infra/               Terraform: DynamoDB + WebSocket API + Lambda
+scripts/             build-words.mjs, package-lambdas.mjs (esbuild bundle → zip)
 ```
 
-On this computer: [http://localhost:5173](http://localhost:5173)
-
-On phones on the same network: use the `http://…:5173` address printed in the terminal.
-
-Health check: [http://localhost:5173/health](http://localhost:5173/health)
-
-Set `PUBLIC_URL` (no trailing slash) when the join QR should use a public hostname instead of a LAN IP:
+## Local development
 
 ```bash
-PUBLIC_URL=https://word-grid.example.ca npm start
+pnpm install
+pnpm dev:web        # http://localhost:5173
 ```
 
-## Docker
+The frontend needs a backend to talk to. Point it at the deployed WebSocket API:
 
 ```bash
-docker build -t dxl-word-grid .
-docker run --rm -p 5173:5173 -e PUBLIC_URL=http://localhost:5173 dxl-word-grid
+# PowerShell
+$env:VITE_WS_URL = "wss://<id>.execute-api.ca-central-1.amazonaws.com/dev"
+pnpm dev:web
 ```
 
-## AWS (Terraform)
+With `VITE_WS_URL` unset the client falls back to the page's own host, which has no
+WebSocket server, so rooms will not connect. Set it before playing locally.
 
-One Fargate task behind an ALB. Rooms are in memory — keep `desired_count` at 1.
-
-1. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and fill in VPC, subnets, and `public_url`.
-2. Create the ECR repo first, then push an image, then apply the rest:
+To refresh the word list in both places that need it (browser + Lambda):
 
 ```bash
-cd terraform
-terraform init
-terraform apply -target=aws_ecr_repository.app
-
-aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin <account>.dkr.ecr.ca-central-1.amazonaws.com
-docker build -t dxl-word-grid ..
-docker tag dxl-word-grid:latest <ecr-url>:latest
-docker push <ecr-url>:latest
-
-terraform apply
+pnpm words
 ```
 
-3. Open the ALB DNS name (or your Route 53 name). `GET /health` should return `{"ok":true}`.
+## Deploy
 
-HTTPS: put an ACM certificate ARN in this region in `certificate_arn`. HTTP-only works if you leave it empty.
+Order matters: stand up AWS first (to get the WebSocket URL), then point the frontend at it.
 
-If the task subnets have no NAT, set `assign_public_ip = true` so Fargate can pull from ECR.
+### 1. Backend (AWS)
 
-## Telemetry
+Dev account `376129877101`, region `ca-central-1`, profile `dev`, resource prefix `dxl-word-grid-dev-`.
 
-Each room writes usage data on this computer only (not to a third-party service):
+```bash
+aws sso login --profile dev
+powershell -ExecutionPolicy Bypass -File infra/scripts/preflight.ps1   # read-only; aborts on name collisions
+terraform -chdir=infra init
+terraform -chdir=infra apply
+```
 
-- `telemetry/events.jsonl` — joins, finds, selections, screens, round start/end
-- `telemetry/rooms.jsonl` — one summary per room when it closes: settings, time in room, visible time, rounds, scores
+This creates:
 
-Player names and found words are included so you can see how a session went. The `telemetry/` folder is gitignored and is not served over HTTP.
+- DynamoDB table `dxl-word-grid-dev-rooms`
+- Lambda `dxl-word-grid-dev-ws` (placeholder code)
+- WebSocket API `dxl-word-grid-dev-ws` with stage `dev`
+
+Note the `ws_stage_url` output, e.g. `wss://abc123.execute-api.ca-central-1.amazonaws.com/dev`.
+
+Deploy the real Lambda code (bundles the handler + word list):
+
+```bash
+pnpm install
+pnpm deploy:lambdas
+```
+
+Optional: set `PUBLIC_URL` before deploying so lobby join links use the Pages URL instead of a relative link:
+
+```bash
+$env:PUBLIC_URL = "https://ubcdigitalexperiencelab.github.io/dxl-word-grid"
+pnpm deploy:lambdas
+```
+
+### 2. Frontend (GitHub Pages)
+
+1. In the repo, enable Pages: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Add a repository variable **Settings → Secrets and variables → Actions → Variables** named `WS_URL`, set to the `ws_stage_url` from step 1.
+3. Push to `main` (or run the **GitHub Pages** workflow manually). It builds `apps/web` with `BASE_PATH=/dxl-word-grid/` and bakes `VITE_WS_URL` in.
+
+The site publishes at `https://ubcdigitalexperiencelab.github.io/dxl-word-grid/`.
+
+## How the round timer works
+
+Lambda cannot hold a `setTimeout` across invocations, so rounds end lazily. Each client runs its own countdown and, when it reaches zero, sends one `endcheck` message; the Lambda finalises the round and broadcasts final scores. A find submitted after time is up also triggers finalisation. No always-on process or scheduler is needed.
 
 ## Tests
 
 ```bash
-npm test
+npm test        # engine rules: scoring, path legality, grid generation
 ```
+
+## Notes
+
+- **The QR code is generated in the browser.** The old single-process server rendered it
+  server-side with the `qrcode` package. Now the client builds the join URL and draws the
+  QR itself, so the backend never has to produce an image.
+- **Terraform state is local.** `infra/terraform.tfstate` is gitignored, so whoever ran
+  the last apply holds the state. Move to a remote S3 backend if more than one person
+  needs to manage this infrastructure.

@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test engine.test.js telemetry.test.js",
+    "dev:web": "pnpm --filter @dxl/word-grid-web dev",
+    "build:web": "pnpm --filter @dxl/word-grid-web build",
+    "package:lambdas": "node scripts/package-lambdas.mjs",
+    "deploy:lambdas": "powershell -ExecutionPolicy Bypass -File infra/scripts/deploy-lambdas.ps1",
+    "test": "node --test packages/engine/src/index.test.js",
     "words": "node scripts/build-words.mjs"
   },
-  "dependencies": {
-    "qrcode": "^1.5.4",
-    "ws": "^8.18.3"
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   }
 }

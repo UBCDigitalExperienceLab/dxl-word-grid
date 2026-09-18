@@ -6,7 +6,9 @@ import {
   lineCells,
   sameCell,
   wordFromCells,
-} from "./engine.js";
+} from "@dxl/word-grid-engine";
+import QRCode from "qrcode";
+import { wsUrl } from "./config.js";
 
 const state = {
   wordSet: new Set(),
@@ -19,6 +21,7 @@ const state = {
   remainingMs: 0,
   endAt: 0,
   timerId: null,
+  endSent: false,
   selecting: false,
   grewByDrag: false,
   startCell: null,
@@ -64,32 +67,17 @@ const els = {
   foundList: document.getElementById("found-list"),
   winner: document.getElementById("winner-banner"),
   resultsBody: document.getElementById("results-body"),
+  playHome: document.getElementById("play-home"),
   playAgain: document.getElementById("play-again"),
+  resultsHome: document.getElementById("results-home"),
   toast: document.getElementById("toast"),
 };
 
 let toastTimer = 0;
 const IDLE_HINT = "Drag through connected letters.";
 let currentScreen = "setup";
-let lastPresenceAt = Date.now();
-
-function trackClient(event, extra = {}) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ type: "telemetry", event, ...extra }));
-}
-
-function flushPresence() {
-  const now = Date.now();
-  const ms = now - lastPresenceAt;
-  lastPresenceAt = now;
-  if (ms <= 0 || ms > 120_000) return;
-  if (currentScreen === "lobby" || currentScreen === "play" || currentScreen === "results") {
-    trackClient("presence", { screen: currentScreen, ms });
-  }
-}
 
 function showScreen(name) {
-  flushPresence();
   Object.entries(screens).forEach(([key, node]) => {
     node.hidden = key !== name;
   });
@@ -97,9 +85,6 @@ function showScreen(name) {
   document.documentElement.classList.toggle("is-playing", name === "play");
   document.documentElement.classList.remove("is-dragging");
   currentScreen = name;
-  if (name === "lobby" || name === "play" || name === "results") {
-    trackClient("screen", { screen: name });
-  }
 }
 
 function showError(node, message) {
@@ -156,8 +141,7 @@ function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return socket;
   }
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  socket = new WebSocket(`${protocol}//${location.host}`);
+  socket = new WebSocket(wsUrl());
   socket.addEventListener("message", (event) => {
     try {
       onServerMessage(JSON.parse(event.data));
@@ -177,8 +161,6 @@ function connect() {
 }
 
 function goHome() {
-  flushPresence();
-  trackClient("home");
   state.leaving = true;
   window.clearInterval(state.timerId);
   state.isHost = false;
@@ -192,9 +174,12 @@ function goHome() {
   showScreen("setup");
 }
 
+// Outgoing frames use `action` so API Gateway's route selection expression
+// ($request.body.action) dispatches them to the Lambda's $default route.
 function send(payload) {
   const ws = connect();
-  const fire = () => ws.send(JSON.stringify(payload));
+  const frame = { ...payload, action: payload.action ?? payload.type };
+  const fire = () => ws.send(JSON.stringify(frame));
   if (ws.readyState === WebSocket.OPEN) fire();
   else ws.addEventListener("open", fire, { once: true });
 }
@@ -204,20 +189,36 @@ function formatDuration(sec) {
   return `${sec}s`;
 }
 
+// The QR code is drawn in the browser rather than on the server: the client
+// already knows the join URL, so the backend never needs to render an image.
+function renderQr(joinUrl) {
+  QRCode.toDataURL(joinUrl, {
+    width: 280,
+    margin: 1,
+    errorCorrectionLevel: "M",
+    color: { dark: "#002145", light: "#ffffff" },
+  })
+    .then((dataUrl) => {
+      els.lobbyQr.src = dataUrl;
+      els.lobbyQrWrap.hidden = false;
+    })
+    .catch(() => {
+      // Losing the QR is not fatal; the room code and link still work.
+      els.lobbyQr.removeAttribute("src");
+      els.lobbyQrWrap.hidden = true;
+    });
+}
+
 function renderLobby(payload) {
   state.roomCode = payload.code;
   state.players = payload.players;
   els.lobbyCode.textContent = payload.code;
   const spec = DIFFICULTIES[payload.difficulty] ?? DIFFICULTIES.medium;
   els.lobbySettings.textContent = `${spec.label} · ${payload.size}×${payload.size} · ${formatDuration(payload.durationSec)}`;
-  if (payload.qrDataUrl) {
-    els.lobbyQr.src = payload.qrDataUrl;
-    els.lobbyQrWrap.hidden = false;
-  } else {
-    els.lobbyQr.removeAttribute("src");
-    els.lobbyQrWrap.hidden = true;
-  }
-  const joinAt = payload.joinUrl || `${state.lanHint || location.origin}/?code=${payload.code}`;
+  const joinAt = payload.joinUrl && payload.joinUrl.startsWith("http")
+    ? payload.joinUrl
+    : `${location.origin}${location.pathname}?code=${payload.code}`;
+  renderQr(joinAt);
   els.lobbyLink.textContent = `Or open ${joinAt}`;
   els.lobbyPlayers.innerHTML = payload.players
     .map((player) => {
@@ -415,7 +416,6 @@ function onPointerDown(event) {
   state.startCell = cell;
   document.documentElement.classList.add("is-dragging");
   setPath([cell], false);
-  trackClient("selection");
   if (event.currentTarget?.setPointerCapture && event.pointerId != null) {
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -443,6 +443,12 @@ function tick(now) {
   state.remainingMs = Math.max(0, state.endAt - now);
   els.timer.textContent = formatTime(state.remainingMs);
   els.timer.classList.toggle("urgent", state.remainingMs <= 10_000);
+  // Lazy round end: the server has no timer, so the client nudges it once
+  // when its local countdown reaches zero. The server finalises and broadcasts.
+  if (state.remainingMs <= 0 && !state.endSent) {
+    state.endSent = true;
+    send({ type: "endcheck" });
+  }
 }
 
 function beginRound(payload) {
@@ -450,6 +456,7 @@ function beginRound(payload) {
   state.players = payload.players;
   state.rankings = payload.rankings ?? [];
   state.endAt = payload.endAt;
+  state.endSent = false;
   renderBoard();
   refreshPlayUi();
   showScreen("play");
@@ -620,10 +627,12 @@ function bindSetup() {
   });
 
   els.lobbyHome.addEventListener("click", goHome);
+  els.playHome.addEventListener("click", goHome);
+  els.resultsHome.addEventListener("click", goHome);
 
   els.playAgain.addEventListener("click", () => {
     if (state.isHost) send({ type: "again" });
-    else showScreen("setup");
+    else goHome();
   });
 
   els.joinCode.addEventListener("input", () => {
@@ -632,7 +641,8 @@ function bindSetup() {
 }
 
 async function loadWords() {
-  const response = await fetch("words.txt");
+  // Served from the same Pages deployment; import.meta.env.BASE_URL respects the base path.
+  const response = await fetch(`${import.meta.env.BASE_URL}words.txt`);
   if (!response.ok) throw new Error("Could not load words.txt");
   const text = await response.text();
   state.wordSet = new Set(
@@ -648,21 +658,4 @@ bindBoard();
 showScreen("setup");
 applyInviteFromUrl();
 
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) flushPresence();
-  else lastPresenceAt = Date.now();
-});
-window.setInterval(() => {
-  if (!document.hidden) flushPresence();
-}, 10_000);
-window.addEventListener("pagehide", flushPresence);
-
 loadWords().catch((error) => showError(els.setupError, error.message));
-
-fetch("/api/info")
-  .then((response) => response.json())
-  .then((info) => {
-    if (info.publicUrl) state.lanHint = info.publicUrl;
-    else if (info.addresses?.[0]) state.lanHint = `http://${info.addresses[0]}:${info.port}`;
-  })
-  .catch(() => {});
