@@ -294,6 +294,17 @@ function refreshPlayUi() {
 function cellAtPoint(x, y, { clamp = false } = {}) {
   const size = state.grid.length;
   if (!size) return null;
+
+  // Ask the DOM first. This is exact, and unlike dividing the board rect into
+  // even slices it accounts for the gap between cells, which otherwise
+  // accumulates into a multi-cell error near the right and bottom edges.
+  const hit = document.elementFromPoint(x, y)?.closest?.(".cell");
+  if (hit?.dataset?.r !== undefined) {
+    return { r: Number(hit.dataset.r), c: Number(hit.dataset.c) };
+  }
+
+  // Fall back to proportional maths for points that land in a gap, or (when
+  // clamping during a drag) for a finger that has strayed off the board.
   const rect = els.board.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
   const inside = x >= rect.left && y >= rect.top && x < rect.right && y < rect.bottom;
@@ -301,6 +312,46 @@ function cellAtPoint(x, y, { clamp = false } = {}) {
   const c = Math.min(size - 1, Math.max(0, Math.floor(((x - rect.left) / rect.width) * size)));
   const r = Math.min(size - 1, Math.max(0, Math.floor(((y - rect.top) / rect.height) * size)));
   return { r, c };
+}
+
+/**
+ * Grows the trail towards `target` one cell at a time.
+ *
+ * Pointer events arrive in discrete jumps, so a quick swipe can land two or
+ * more cells away from the last one. Diagonal movement covers more ground per
+ * event than straight movement, so it skips cells more often. Stepping through
+ * the intermediate cells keeps the trail connected instead of dropping the
+ * move, which is what made diagonal swipes feel unresponsive.
+ */
+function extendPathTowards(target) {
+  let path = state.path;
+  for (let guard = 0; guard < 64; guard += 1) {
+    const last = path[path.length - 1];
+    if (!last || sameCell(last, target)) break;
+    const step = {
+      r: last.r + Math.sign(target.r - last.r),
+      c: last.c + Math.sign(target.c - last.c),
+    };
+    // applyCellToPath also handles walking backwards, so dragging back along
+    // the trail still erases letters.
+    const next = applyCellToPath(path, step);
+    if (!next || next === path) break;
+    path = next;
+  }
+  return path;
+}
+
+function haptic(pattern) {
+  // Android/Chrome only. iOS Safari does not implement the Vibration API, so
+  // this is a no-op on iPhone.
+  if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
+function clearSelection() {
+  state.selecting = false;
+  state.grewByDrag = false;
+  state.startCell = null;
+  setPath([], false);
 }
 
 function setPath(path, valid) {
@@ -322,9 +373,21 @@ function setPath(path, valid) {
     return;
   }
   const word = wordFromCells(state.grid, path);
-  els.readout.textContent = word;
+  els.readout.innerHTML = `${word}<small class="readout-hint">${selectionHint(path, valid)}</small>`;
   els.readout.classList.add("is-selecting");
   els.readout.classList.toggle("is-valid", Boolean(valid));
+}
+
+/** Spells out what the current trail will do, so submitting is never a guess. */
+function selectionHint(path, valid) {
+  if (path.length < MIN_WORD_LENGTH) {
+    const need = MIN_WORD_LENGTH - path.length;
+    return `keep going · ${need} more letter${need === 1 ? "" : "s"}`;
+  }
+  if (!valid) {
+    return state.selecting ? "not a word yet" : "not a word · tap outside to clear";
+  }
+  return state.selecting ? "lift your finger to submit" : "tap the last letter to submit";
 }
 
 function renderBoard() {
@@ -426,8 +489,8 @@ function onPointerMove(event) {
   event.preventDefault();
   const cell = cellAtPoint(event.clientX, event.clientY, { clamp: true });
   if (!cell) return;
-  const next = applyCellToPath(state.path, cell);
-  if (!next || next === state.path) return;
+  const next = extendPathTowards(cell);
+  if (next === state.path) return;
   state.grewByDrag = true;
   setPath(next, pathIsValid(next));
 }
@@ -436,7 +499,21 @@ function onPointerUp() {
   document.documentElement.classList.remove("is-dragging");
   if (!state.selecting) return;
   state.selecting = false;
-  if (state.grewByDrag && state.path.length >= MIN_WORD_LENGTH) trySubmitPath();
+  if (state.grewByDrag && state.path.length >= MIN_WORD_LENGTH) {
+    trySubmitPath();
+    return;
+  }
+  // Kept on screen as a tap-built selection; refresh the hint so it now
+  // describes tapping rather than lifting.
+  if (state.path.length) setPath(state.path, pathIsValid(state.path));
+}
+
+/** A tap anywhere off the board abandons a stray selection. */
+function onDocumentPointerDown(event) {
+  if (screens.play.hidden) return;
+  if (state.selecting || !state.path.length) return;
+  if (els.board.contains(event.target)) return;
+  clearSelection();
 }
 
 function tick(now) {
@@ -552,12 +629,15 @@ function onServerMessage(message) {
   if (message.type === "find-ok") {
     state.rankings = message.rankings;
     showToast(`${message.word} · ${message.kind} · ${message.points} pts`);
-    if (navigator.vibrate) navigator.vibrate(12);
+    // A double pulse marks the high-scoring unique find; shared words get a
+    // single short tap so the two outcomes feel different in the hand.
+    haptic(message.kind === "unique" ? [18, 45, 28] : 16);
     refreshPlayUi();
     return;
   }
   if (message.type === "find-err") {
     showToast(message.message);
+    haptic(40);
     return;
   }
   if (message.type === "scores") {
@@ -585,6 +665,7 @@ function bindBoard() {
   els.board.addEventListener("dragstart", (event) => event.preventDefault());
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
+  document.addEventListener("pointerdown", onDocumentPointerDown);
   window.addEventListener("resize", fitBoard);
   window.visualViewport?.addEventListener("resize", fitBoard);
 }

@@ -418,6 +418,22 @@ button,
   color: var(--white);
 }
 
+/* Secondary line telling the player what will happen next. */
+.readout-hint {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.selection-readout.is-valid .readout-hint {
+  color: #9fe0b5;
+}
+
 .play-grid-wrap {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
@@ -466,8 +482,10 @@ button,
   background: var(--path);
 }
 
+/* Distinct from the plain trail colour: green reads as "this one counts". */
 .cell.is-valid {
-  background: var(--valid);
+  background: #bfe6cd;
+  border-color: #7fc79b;
 }
 
 .cell.is-origin {
